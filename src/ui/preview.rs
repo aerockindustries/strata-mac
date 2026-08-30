@@ -396,6 +396,26 @@ impl PreviewState {
                 video.set_file(Some(&file));
                 video.set_hexpand(true);
                 video.set_vexpand(true);
+                if let Some(stream) = video.media_stream() {
+                    let state = Rc::downgrade(self);
+                    let widget = video.downgrade();
+                    let report = move |stream: &gtk::MediaStream| {
+                        let (Some(state), Some(widget)) = (state.upgrade(), widget.upgrade())
+                        else {
+                            return;
+                        };
+                        // A stale stream must not clobber a newer preview.
+                        if widget.parent().as_ref() != Some(state.content.upcast_ref()) {
+                            return;
+                        }
+                        let Some(error) = stream.error() else {
+                            return;
+                        };
+                        state.show_message("Playback unavailable", &media_error_detail(&error));
+                    };
+                    report(&stream);
+                    stream.connect_error_notify(report);
+                }
                 self.content.append(&video);
             }
             PreviewContent::Pdf { png, page, pages } => {
@@ -807,6 +827,18 @@ fn set_adjustment_value(adjustment: &gtk::Adjustment, value: f64) {
 fn clear_box(box_: &gtk::Box) {
     while let Some(child) = box_.first_child() {
         box_.remove(&child);
+    }
+}
+
+fn media_error_detail(error: &glib::Error) -> String {
+    let message = error.message();
+    if message.to_lowercase().contains("plug-in") || message.to_lowercase().contains("plugin") {
+        format!(
+            "{message}\n\nInstall the GStreamer codec plugins for this format \
+             (on Arch: gst-plugins-good and gst-libav)."
+        )
+    } else {
+        message.to_owned()
     }
 }
 

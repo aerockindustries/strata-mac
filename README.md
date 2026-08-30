@@ -65,11 +65,15 @@ The architectural boundaries and performance workflow are documented in [`docs/a
 - Poppler GLib
 - Fontconfig
 - A C toolchain and `pkg-config`
+- GStreamer codec plugins for audio and video previews (at minimum the
+  "good" plugin set for common containers such as MP4, plus `libav` for
+  H.264/AAC decoding)
 
 On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5 poppler-glib
+sudo pacman -S --needed base-devel rust fontconfig gtk4 gtksourceview5 poppler-glib \
+  gst-plugins-good gst-libav
 ```
 
 Run Strata:
