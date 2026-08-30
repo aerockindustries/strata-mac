@@ -579,6 +579,26 @@ switch:checked slider {
   color: @theme_border;
 }
 
+.sidebar-trash-row .sidebar-row-action {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  box-shadow: none;
+  min-height: 24px;
+  min-width: 24px;
+  opacity: 0;
+  padding: 3px;
+}
+
+.sidebar-trash-row:hover .sidebar-row-action,
+.sidebar-trash-row .sidebar-row-action:focus {
+  opacity: 1;
+}
+
+.sidebar-trash-row .sidebar-row-action:hover {
+  background: alpha(@theme_danger, 0.14);
+}
+
 .sidebar-separator {
   background: alpha(@theme_border, 0.24);
   margin: 6px 4px;

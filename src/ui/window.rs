@@ -118,7 +118,7 @@ pub fn present_location(application: &gtk::Application, location: Option<PathBuf
     content.set_resize_start_child(false);
     content.set_position(SIDEBAR_WIDTH);
     content.set_vexpand(true);
-    let sidebar = build_sidebar(browser.browser());
+    let sidebar = build_sidebar(browser.browser(), browser.empty_trash_requester());
     sidebar.widget.set_size_request(MIN_SIDEBAR_WIDTH, -1);
     content.set_start_child(Some(&sidebar.widget));
     content.set_end_child(Some(&browser.widget()));
@@ -523,6 +523,7 @@ struct SidebarState {
     volume_monitor: gio::VolumeMonitor,
     place_order: RefCell<Vec<&'static str>>,
     place_rows: RefCell<Vec<(Location, gtk::Button)>>,
+    empty_trash: Rc<dyn Fn()>,
 }
 
 struct SidebarView {
@@ -551,11 +552,7 @@ impl SidebarState {
             "Home",
             Location::local(home_directory()),
         );
-        self.append_place(
-            crate::assets::icons::TRASH,
-            "Trash",
-            Location::uri("trash:///"),
-        );
+        self.append_trash_place();
         self.append_separator();
 
         for place in self.place_order.borrow().clone() {
@@ -743,6 +740,42 @@ impl SidebarState {
         self.widget.append(&row);
     }
 
+    fn append_trash_place(&self) {
+        let location = Location::uri("trash:///");
+        let row = sidebar_button(crate::assets::icons::TRASH, "Trash");
+        row.set_hexpand(true);
+        row.set_tooltip_text(Some(&location.display_path()));
+        self.place_rows
+            .borrow_mut()
+            .push((location.clone(), row.clone()));
+        let weak_browser = Rc::downgrade(&self.browser);
+        let sidebar = self.widget.clone();
+        let selected_row = row.clone();
+        row.connect_clicked(move |_| {
+            select_sidebar_row(&sidebar, &selected_row);
+            if let Some(browser) = weak_browser.upgrade() {
+                browser.navigate(location.clone());
+            }
+        });
+
+        let empty = gtk::Button::builder().tooltip_text("Empty Trash…").build();
+        empty.set_child(Some(&crate::assets::danger_icon(
+            crate::assets::icons::X,
+            14,
+        )));
+        empty.add_css_class("sidebar-row-action");
+        empty.set_has_frame(false);
+        empty.set_valign(gtk::Align::Center);
+        let empty_trash = self.empty_trash.clone();
+        empty.connect_clicked(move |_| empty_trash());
+
+        let container = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        container.add_css_class("sidebar-trash-row");
+        container.append(&row);
+        container.append(&empty);
+        self.widget.append(&container);
+    }
+
     fn append_place(&self, icon: &str, name: &str, location: Location) {
         let row = sidebar_button(icon, name);
         row.set_tooltip_text(Some(&location.display_path()));
@@ -767,6 +800,14 @@ fn select_sidebar_row(sidebar: &gtk::Box, selected: &gtk::Button) {
     while let Some(widget) = child {
         if let Ok(row) = widget.clone().downcast::<gtk::Button>() {
             row.remove_css_class("active");
+        } else {
+            let mut inner = widget.first_child();
+            while let Some(inner_widget) = inner {
+                if let Ok(row) = inner_widget.clone().downcast::<gtk::Button>() {
+                    row.remove_css_class("active");
+                }
+                inner = inner_widget.next_sibling();
+            }
         }
         child = widget.next_sibling();
     }
@@ -851,7 +892,7 @@ fn navigate_to_gio_file(browser: &Rc<Browser>, file: &gio::File) {
     browser.navigate(location);
 }
 
-fn build_sidebar(browser: Rc<Browser>) -> SidebarView {
+fn build_sidebar(browser: Rc<Browser>, empty_trash: Rc<dyn Fn()>) -> SidebarView {
     let widget = gtk::Box::new(gtk::Orientation::Vertical, 2);
     widget.add_css_class("sidebar");
     let scroller = gtk::ScrolledWindow::builder()
@@ -874,6 +915,7 @@ fn build_sidebar(browser: Rc<Browser>) -> SidebarView {
             "videos",
         ]),
         place_rows: RefCell::new(Vec::new()),
+        empty_trash,
     });
 
     let weak = Rc::downgrade(&state);

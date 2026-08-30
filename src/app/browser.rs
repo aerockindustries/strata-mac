@@ -11,8 +11,8 @@ use crate::{
     model::{FileEntry, Location, SortDirection, SortKey, ViewPreferences},
     services::{
         CreateDirectoryRequest, DeleteRequest, DirectoryChange, DirectoryEvent, DirectoryRequest,
-        FileSource, LoadHandle, LocationValidationError, OperationEvent, OperationProvider,
-        OperationRequestId, PasteRequest, RenameRequest, RequestId,
+        EmptyTrashRequest, FileSource, LoadHandle, LocationValidationError, OperationEvent,
+        OperationProvider, OperationRequestId, PasteRequest, RenameRequest, RequestId,
     },
 };
 
@@ -532,6 +532,21 @@ impl Browser {
                 entries,
                 permanent,
             },
+            self.operation_callback(request_id, false),
+        );
+        self.operation_load.replace(Some(load));
+    }
+
+    pub fn empty_trash(self: &Rc<Self>) {
+        let Some(provider) = self.operation_provider.borrow().clone() else {
+            self.emit(BrowserEvent::OperationFailed {
+                message: "File operations are unavailable".to_owned(),
+            });
+            return;
+        };
+        let request_id = self.begin_operation();
+        let load = provider.empty_trash(
+            EmptyTrashRequest { id: request_id },
             self.operation_callback(request_id, false),
         );
         self.operation_load.replace(Some(load));

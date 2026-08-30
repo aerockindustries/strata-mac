@@ -39,6 +39,11 @@ pub struct DeleteRequest {
 }
 
 #[derive(Clone, Debug)]
+pub struct EmptyTrashRequest {
+    pub id: OperationRequestId,
+}
+
+#[derive(Clone, Debug)]
 pub enum OperationEvent {
     Renamed {
         request_id: OperationRequestId,
@@ -67,4 +72,6 @@ pub trait OperationProvider {
     ) -> LoadHandle;
     fn paste(&self, request: PasteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle;
     fn delete(&self, request: DeleteRequest, emit: Rc<dyn Fn(OperationEvent)>) -> LoadHandle;
+    fn empty_trash(&self, request: EmptyTrashRequest, emit: Rc<dyn Fn(OperationEvent)>)
+    -> LoadHandle;
 }

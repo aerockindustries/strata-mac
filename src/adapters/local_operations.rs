@@ -10,8 +10,8 @@ use gtk::{gio, glib, prelude::*};
 use crate::{
     model::Location,
     services::{
-        CreateDirectoryRequest, DeleteRequest, LoadHandle, OperationEvent, OperationProvider,
-        PasteRequest, RenameRequest,
+        CreateDirectoryRequest, DeleteRequest, EmptyTrashRequest, LoadHandle, OperationEvent,
+        OperationProvider, PasteRequest, RenameRequest,
     },
 };
 
@@ -220,6 +220,57 @@ impl OperationProvider for LocalOperationProvider {
             emit(OperationEvent::Deleted {
                 request_id: request.id,
             });
+        });
+        LoadHandle::new(move || task.abort())
+    }
+
+    fn empty_trash(
+        &self,
+        request: EmptyTrashRequest,
+        emit: Rc<dyn Fn(OperationEvent)>,
+    ) -> LoadHandle {
+        let task = glib::MainContext::default().spawn_local(async move {
+            let trash = gio::File::for_uri("trash:///");
+            let result = async {
+                let enumerator = trash
+                    .enumerate_children_future(
+                        "standard::name,standard::type",
+                        gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                        glib::Priority::DEFAULT,
+                    )
+                    .await?;
+                loop {
+                    let children = enumerator
+                        .next_files_future(64, glib::Priority::DEFAULT)
+                        .await?;
+                    if children.is_empty() {
+                        break;
+                    }
+                    for child in children {
+                        let file = trash.child(child.name());
+                        let is_directory = child.file_type() == gio::FileType::Directory;
+                        // The trash backend removes a top-level item and its
+                        // contents in one delete; recursion is a fallback.
+                        if let Err(error) = file.delete_future(glib::Priority::DEFAULT).await {
+                            if !is_directory {
+                                return Err(error);
+                            }
+                            permanently_delete(file, true).await?;
+                        }
+                    }
+                }
+                Ok::<(), glib::Error>(())
+            }
+            .await;
+            match result {
+                Ok(()) => emit(OperationEvent::Deleted {
+                    request_id: request.id,
+                }),
+                Err(error) => emit(OperationEvent::Failed {
+                    request_id: request.id,
+                    message: error.to_string(),
+                }),
+            }
         });
         LoadHandle::new(move || task.abort())
     }

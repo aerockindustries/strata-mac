@@ -465,6 +465,15 @@ impl BrowserView {
         true
     }
 
+    pub fn empty_trash_requester(&self) -> Rc<dyn Fn()> {
+        let weak = Rc::downgrade(&self.state);
+        Rc::new(move || {
+            if let Some(state) = weak.upgrade() {
+                state.show_empty_trash_confirmation();
+            }
+        })
+    }
+
     pub fn filter_has_focus(&self) -> bool {
         self.state
             .columns
@@ -752,6 +761,127 @@ impl ViewState {
         let browser = self.browser.clone();
         confirm.connect_clicked(move |_| {
             browser.delete(entries.clone(), permanent);
+            dismiss_modal_layer(
+                &confirmed_layer,
+                &confirmed_overlay,
+                confirmed_root.as_ref(),
+            );
+        });
+        let escape = gtk::EventControllerKey::new();
+        let escaped_layer = layer.clone();
+        let escaped_overlay = window_overlay;
+        let escaped_root = blurred_root;
+        escape.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                dismiss_modal_layer(&escaped_layer, &escaped_overlay, escaped_root.as_ref());
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        layer.add_controller(escape);
+        cancel.grab_focus();
+    }
+
+    fn show_empty_trash_confirmation(self: &Rc<Self>) {
+        let Some(window_overlay) = self
+            .overlay
+            .root()
+            .and_downcast::<gtk::Window>()
+            .and_then(|window| window.child())
+            .and_downcast::<gtk::Overlay>()
+        else {
+            return;
+        };
+        let blurred_root = window_overlay.child().and_downcast::<BlurBin>();
+        if let Some(root) = blurred_root.as_ref() {
+            root.set_blurred(true);
+        }
+
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("delete-confirmation");
+        content.add_css_class("delete-confirmation-content");
+        content.set_halign(gtk::Align::Center);
+        content.set_valign(gtk::Align::Center);
+
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        header.add_css_class("delete-confirmation-header");
+        let symbol = gtk::CenterBox::new();
+        symbol.add_css_class("delete-confirmation-symbol");
+        symbol.set_size_request(40, 40);
+        symbol.set_hexpand(false);
+        let symbol_icon = crate::assets::danger_icon(crate::assets::icons::TRASH, 21);
+        symbol.set_center_widget(Some(&symbol_icon));
+        let heading = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        heading.set_hexpand(true);
+        let question = gtk::Label::new(Some("Empty trash?"));
+        question.add_css_class("delete-confirmation-title");
+        question.set_xalign(0.0);
+        let subtitle = gtk::Label::new(Some("Everything in the trash"));
+        subtitle.add_css_class("delete-confirmation-subtitle");
+        subtitle.set_xalign(0.0);
+        heading.append(&question);
+        heading.append(&subtitle);
+        let close = gtk::Button::new();
+        close.add_css_class("delete-confirmation-close");
+        close.set_tooltip_text(Some("Cancel"));
+        close.set_child(Some(&crate::assets::text_icon(crate::assets::icons::X, 16)));
+        header.append(&symbol);
+        header.append(&heading);
+        header.append(&close);
+        content.append(&header);
+
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        body.add_css_class("delete-confirmation-body");
+        let explanation = gtk::Label::new(Some(
+            "All items in the trash will be permanently deleted. This action cannot be undone.",
+        ));
+        explanation.add_css_class("delete-confirmation-explanation");
+        explanation.set_wrap(true);
+        explanation.set_xalign(0.0);
+        body.append(&explanation);
+        content.append(&body);
+
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        actions.add_css_class("delete-confirmation-actions");
+        let action_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        action_spacer.set_hexpand(true);
+        let cancel = gtk::Button::with_label("Cancel");
+        cancel.add_css_class("delete-confirmation-cancel");
+        let confirm_content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        confirm_content.append(&crate::assets::danger_icon(crate::assets::icons::TRASH, 15));
+        confirm_content.append(&gtk::Label::new(Some("Empty Trash")));
+        let confirm = gtk::Button::builder().child(&confirm_content).build();
+        confirm.add_css_class("delete-confirmation-delete");
+        actions.append(&action_spacer);
+        actions.append(&cancel);
+        actions.append(&confirm);
+        content.append(&actions);
+
+        let layer = modal_layer(&content);
+        window_overlay.add_overlay(&layer);
+        let cancelled_layer = layer.clone();
+        let cancelled_overlay = window_overlay.clone();
+        let cancelled_root = blurred_root.clone();
+        cancel.connect_clicked(move |_| {
+            dismiss_modal_layer(
+                &cancelled_layer,
+                &cancelled_overlay,
+                cancelled_root.as_ref(),
+            );
+        });
+        let closed_layer = layer.clone();
+        let closed_overlay = window_overlay.clone();
+        let closed_root = blurred_root.clone();
+        close.connect_clicked(move |_| {
+            dismiss_modal_layer(&closed_layer, &closed_overlay, closed_root.as_ref());
+        });
+        let confirmed_layer = layer.clone();
+        let confirmed_overlay = window_overlay.clone();
+        let confirmed_root = blurred_root.clone();
+        let browser = self.browser.clone();
+        confirm.connect_clicked(move |_| {
+            browser.empty_trash();
             dismiss_modal_layer(
                 &confirmed_layer,
                 &confirmed_overlay,

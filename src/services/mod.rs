@@ -9,8 +9,8 @@ pub use file_source::{
     LocationValidationError, RequestId,
 };
 pub use operations::{
-    CreateDirectoryRequest, DeleteRequest, OperationEvent, OperationProvider, OperationRequestId,
-    PasteRequest, RenameRequest,
+    CreateDirectoryRequest, DeleteRequest, EmptyTrashRequest, OperationEvent, OperationProvider,
+    OperationRequestId, PasteRequest, RenameRequest,
 };
 pub(crate) use preview::content_family;
 pub use preview::{
