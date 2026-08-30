@@ -202,6 +202,95 @@ impl FileSource for FakeFileSource {
     }
 }
 
+struct SortableFileSource;
+
+impl FileSource for SortableFileSource {
+    fn validate_location(&self, _location: &Location) -> Result<(), LocationValidationError> {
+        Ok(())
+    }
+
+    fn enumerate(&self, request: DirectoryRequest, emit: Rc<dyn Fn(DirectoryEvent)>) -> LoadHandle {
+        let entry = |name: &str, size: u64, modified: i64| FileEntry {
+            location: Location::local(format!("/fixture/{name}")),
+            native_name: OsString::from(name),
+            display_name: name.into(),
+            kind: EntryKind::File,
+            size: MetadataValue::Known(size),
+            modified_unix_seconds: MetadataValue::Known(modified),
+        };
+        emit(DirectoryEvent::Batch {
+            request_id: request.id,
+            entries: vec![
+                entry("alpha", 300, 30),
+                entry("bravo", 100, 20),
+                entry("charlie", 200, 10),
+            ],
+        });
+        emit(DirectoryEvent::Finished {
+            request_id: request.id,
+        });
+        LoadHandle::new(|| {})
+    }
+}
+
+fn replaced_names(events: &[BrowserEvent]) -> Option<Vec<String>> {
+    events.iter().rev().find_map(|event| match event {
+        BrowserEvent::EntriesReplaced { depth: 0, entries } => Some(
+            entries
+                .iter()
+                .map(|entry| entry.display_name.clone())
+                .collect(),
+        ),
+        _ => None,
+    })
+}
+
+#[test]
+fn changing_the_sort_key_reorders_the_column_entries() {
+    let browser = Browser::new(Rc::new(SortableFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+
+    events.borrow_mut().clear();
+    browser.set_sort_key(0, SortKey::Size);
+    assert_eq!(
+        replaced_names(&events.borrow()),
+        Some(vec!["bravo".into(), "charlie".into(), "alpha".into()])
+    );
+
+    events.borrow_mut().clear();
+    browser.set_sort_key(0, SortKey::Modified);
+    assert_eq!(
+        replaced_names(&events.borrow()),
+        Some(vec!["charlie".into(), "bravo".into(), "alpha".into()])
+    );
+
+    events.borrow_mut().clear();
+    browser.set_sort_key(0, SortKey::Name);
+    assert_eq!(
+        replaced_names(&events.borrow()),
+        Some(vec!["alpha".into(), "bravo".into(), "charlie".into()])
+    );
+}
+
+#[test]
+fn reversing_the_sort_direction_reorders_the_column_entries() {
+    let browser = Browser::new(Rc::new(SortableFileSource));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event));
+    browser.navigate(Location::local("/fixture"));
+
+    events.borrow_mut().clear();
+    browser.set_sort_direction(0, SortDirection::Descending);
+    assert_eq!(
+        replaced_names(&events.borrow()),
+        Some(vec!["charlie".into(), "bravo".into(), "alpha".into()])
+    );
+}
+
 #[test]
 fn navigation_events_are_delivered_to_every_observer() {
     let browser = Browser::new(Rc::new(FakeFileSource));

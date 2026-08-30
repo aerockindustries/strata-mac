@@ -749,26 +749,113 @@ fn compare_entries(left: &FileEntry, right: &FileEntry, preferences: ViewPrefere
         }
     }
 
+    let direction = preferences.sort_direction;
     let ordering = match preferences.sort_key {
-        SortKey::Name => left.display_name.cmp(&right.display_name),
-        SortKey::Type => left.kind.cmp(&right.kind),
-        SortKey::Size => compare_metadata(&left.size, &right.size),
-        SortKey::Modified => {
-            compare_metadata(&left.modified_unix_seconds, &right.modified_unix_seconds)
-        }
-    };
-    let ordering = match preferences.sort_direction {
-        SortDirection::Ascending => ordering,
-        SortDirection::Descending => ordering.reverse(),
+        SortKey::Name => directed(
+            compare_names(&left.display_name, &right.display_name),
+            direction,
+        ),
+        SortKey::Type => directed(compare_types(left, right), direction),
+        SortKey::Size => compare_metadata(&left.size, &right.size, direction),
+        SortKey::Modified => compare_metadata(
+            &left.modified_unix_seconds,
+            &right.modified_unix_seconds,
+            direction,
+        ),
     };
     ordering
-        .then_with(|| left.display_name.cmp(&right.display_name))
+        .then_with(|| compare_names(&left.display_name, &right.display_name))
         .then_with(|| left.location.compare(&right.location))
 }
 
-fn compare_metadata<T: Ord>(left: &MetadataValue<T>, right: &MetadataValue<T>) -> Ordering {
+fn directed(ordering: Ordering, direction: SortDirection) -> Ordering {
+    match direction {
+        SortDirection::Ascending => ordering,
+        SortDirection::Descending => ordering.reverse(),
+    }
+}
+
+// Natural name order: case-insensitive, with digit runs compared as numbers so
+// "file2" sorts before "file10". Equal foldings fall back to byte order to keep
+// the comparator a total order for binary searches.
+fn compare_names(left: &str, right: &str) -> Ordering {
+    let mut left_chars = left.chars().peekable();
+    let mut right_chars = right.chars().peekable();
+    loop {
+        match (left_chars.peek().copied(), right_chars.peek().copied()) {
+            (None, None) => return left.cmp(right),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(first), Some(second)) if first.is_ascii_digit() && second.is_ascii_digit() => {
+                let left_run = take_digit_run(&mut left_chars);
+                let right_run = take_digit_run(&mut right_chars);
+                let ordering = compare_digit_runs(&left_run, &right_run);
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(first), Some(second)) => {
+                let ordering = first.to_lowercase().cmp(second.to_lowercase());
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+                left_chars.next();
+                right_chars.next();
+            }
+        }
+    }
+}
+
+fn take_digit_run(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+    let mut run = String::new();
+    while let Some(digit) = chars.peek().copied().filter(char::is_ascii_digit) {
+        run.push(digit);
+        chars.next();
+    }
+    run
+}
+
+fn compare_digit_runs(left: &str, right: &str) -> Ordering {
+    let left = left.trim_start_matches('0');
+    let right = right.trim_start_matches('0');
+    left.len().cmp(&right.len()).then_with(|| left.cmp(right))
+}
+
+// Entries of the same kind are refined by file extension so "Type" groups
+// related files instead of tying every regular file.
+fn compare_types(left: &FileEntry, right: &FileEntry) -> Ordering {
+    let ordering = left.kind.cmp(&right.kind);
+    if ordering != Ordering::Equal || left.is_directory() {
+        return ordering;
+    }
+    match (
+        name_extension(&left.display_name),
+        name_extension(&right.display_name),
+    ) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(left), Some(right)) => compare_names(left, right),
+    }
+}
+
+fn name_extension(name: &str) -> Option<&str> {
+    name.rfind('.')
+        .filter(|position| *position > 0)
+        .map(|position| &name[position + 1..])
+}
+
+// Entries without metadata always group after known values, regardless of the
+// sort direction; only known-to-known comparisons follow the direction.
+fn compare_metadata<T: Ord>(
+    left: &MetadataValue<T>,
+    right: &MetadataValue<T>,
+    direction: SortDirection,
+) -> Ordering {
     match (left, right) {
-        (MetadataValue::Known(left), MetadataValue::Known(right)) => left.cmp(right),
+        (MetadataValue::Known(left), MetadataValue::Known(right)) => {
+            directed(left.cmp(right), direction)
+        }
         (MetadataValue::Known(_), _) => Ordering::Less,
         (_, MetadataValue::Known(_)) => Ordering::Greater,
         (MetadataValue::Unknown, MetadataValue::Unavailable) => Ordering::Less,

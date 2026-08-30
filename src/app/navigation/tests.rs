@@ -470,3 +470,90 @@ fn changing_sort_preferences_only_reorders_the_target_column() {
     assert_eq!(state.columns[0].entries[0].display_name, "a");
     assert_eq!(state.columns[1].entries[0].display_name, "z");
 }
+
+#[test]
+fn name_sorting_is_case_insensitive_and_numeric_aware() {
+    let names = ["file10.txt", "File2.txt", "apple", "Banana"];
+    let mut entries: Vec<_> = names
+        .iter()
+        .map(|name| {
+            let mut entry = named_entry(&format!("/fixture/{name}"), name);
+            entry.kind = EntryKind::File;
+            entry
+        })
+        .collect();
+    entries.sort_by(|left, right| compare_entries(left, right, ViewPreferences::default()));
+
+    let sorted: Vec<_> = entries
+        .iter()
+        .map(|entry| entry.display_name.as_str())
+        .collect();
+    assert_eq!(sorted, ["apple", "Banana", "File2.txt", "file10.txt"]);
+}
+
+#[test]
+fn type_sorting_groups_files_by_extension() {
+    let names = ["notes.txt", "photo.png", "archive.zip", "README"];
+    let mut entries: Vec<_> = names
+        .iter()
+        .map(|name| {
+            let mut entry = named_entry(&format!("/fixture/{name}"), name);
+            entry.kind = EntryKind::File;
+            entry
+        })
+        .collect();
+    entries.sort_by(|left, right| {
+        compare_entries(
+            left,
+            right,
+            ViewPreferences {
+                sort_key: SortKey::Type,
+                ..ViewPreferences::default()
+            },
+        )
+    });
+
+    let sorted: Vec<_> = entries
+        .iter()
+        .map(|entry| entry.display_name.as_str())
+        .collect();
+    assert_eq!(sorted, ["README", "photo.png", "notes.txt", "archive.zip"]);
+}
+
+#[test]
+fn size_sorting_keeps_missing_metadata_last_in_both_directions() {
+    let mut entries: Vec<_> = [("small", 10), ("large", 500)]
+        .iter()
+        .map(|(name, size)| {
+            let mut entry = named_entry(&format!("/fixture/{name}"), name);
+            entry.kind = EntryKind::File;
+            entry.size = MetadataValue::Known(*size);
+            entry
+        })
+        .collect();
+    let mut unknown = named_entry("/fixture/unknown", "unknown");
+    unknown.kind = EntryKind::File;
+    entries.push(unknown);
+
+    let preferences = |sort_direction| ViewPreferences {
+        sort_key: SortKey::Size,
+        sort_direction,
+        ..ViewPreferences::default()
+    };
+    entries
+        .sort_by(|left, right| compare_entries(left, right, preferences(SortDirection::Ascending)));
+    let ascending: Vec<_> = entries
+        .iter()
+        .map(|entry| entry.display_name.as_str())
+        .collect();
+    assert_eq!(ascending, ["small", "large", "unknown"]);
+
+    entries.sort_by(|left, right| {
+        compare_entries(left, right, preferences(SortDirection::Descending))
+    });
+    let descending: Vec<_> = entries
+        .iter()
+        .map(|entry| entry.display_name.as_str())
+        .collect();
+    assert_eq!(descending, ["large", "small", "unknown"]);
+}
